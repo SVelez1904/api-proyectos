@@ -1,5 +1,6 @@
 package com.innovatech.api_proyectos.entity;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDate;
@@ -36,5 +37,6 @@ public class Proyecto {
     private List<Task> tasks;
 
     @OneToMany(mappedBy = "proyecto", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonManagedReference
     private List<Asignacion> asignaciones;
 }
