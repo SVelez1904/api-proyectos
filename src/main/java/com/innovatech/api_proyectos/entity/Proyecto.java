@@ -23,7 +23,10 @@ public class Proyecto {
     @Column(name = "fecha_inicio")
     private LocalDate fechaInicio;
 
-    private String prioridad; // Sugerencia: LOW, MEDIUM, HIGH
+    @Column(name = "fecha_entrega")
+    private LocalDate fechaEntrega;
+
+    private String prioridad;
 
     @Column(name = "progreso_porcentaje")
     private Integer progresoPorcentaje;
@@ -31,6 +34,25 @@ public class Proyecto {
     // Relación con el microservicio de Usuarios
     @Column(name = "usuario_id")
     private Long usuarioId; // Solo guardamos el ID
+
+    @Transient // transient indica que se calcula acá y no en la base de datos
+    public String getEstadoCalculado() {
+        if (progresoPorcentaje != null && progresoPorcentaje >= 100) { // esto indica que el proyecto está terminado
+            return "COMPLETADO";
+        }
+
+        LocalDate hoy = LocalDate.now(); // esto inicializa la fecha de hoy para caluclar los atrasos
+
+        if (fechaEntrega != null && hoy.isAfter(fechaEntrega)) { // si el dia de hoy es mayor a la entrega está atrasado
+            return "ATRASADO";
+        }
+
+        if (fechaEntrega != null && hoy.plusDays(7).isAfter(fechaEntrega)) { // esto es para alertar de que queda una semana
+            return "CRÍTICO (Próximo a vencer)";
+        }
+
+        return "A TIEMPO";
+    }
 
     // Relación One-to-Many con Tareas
     @OneToMany(mappedBy = "proyecto", cascade = CascadeType.ALL, orphanRemoval = true)
