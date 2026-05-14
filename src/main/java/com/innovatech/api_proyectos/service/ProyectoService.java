@@ -31,10 +31,12 @@ public class ProyectoService {
     }
 
     @Transactional
-    public void guardarProyecto(Proyecto p) {
+    public Proyecto guardarProyecto(Proyecto p) {
+        // 1. Guardar en la base de datos local
         Proyecto proyectoGuardado = proyectoRepository.save(p);
+        System.out.println("Proyecto guardado en DB, intentando enviar a Kafka...");
 
-        // Creamos el evento usando los nombres correctos de la entidad
+        // 2. Preparar el evento para Analytics
         ProyectoEvent evento = new ProyectoEvent(
                 proyectoGuardado.getId(),
                 proyectoGuardado.getNombre(),
@@ -43,6 +45,16 @@ public class ProyectoService {
                 "UPDATE"
         );
 
-        kafkaTemplate.send("proyectos-topic", evento);
+        // 3. Enviar a Kafka de forma asíncrona
+        kafkaTemplate.send("proyectos-topic", evento).whenComplete((result, ex) -> {
+            if (ex != null) {
+                System.err.println("FATAL: No se pudo enviar a Kafka: " + ex.getMessage());
+            } else {
+                System.out.println("EXITO: Mensaje en tópico proyectos-topic, offset: " + result.getRecordMetadata().offset());
+            }
+        });
+
+        // 4. ¡IMPORTANTE! Retornar el objeto guardado
+        return proyectoGuardado;
     }
 }

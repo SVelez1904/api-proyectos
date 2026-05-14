@@ -5,6 +5,14 @@ spring:
   application:
     name: api-proyectos
 
+  kafka:
+    bootstrap-servers: kafka:29092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: true
+
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://db-proyectos:5432/db_proyectos}
     username: ${SPRING_DATASOURCE_USERNAME:admin}

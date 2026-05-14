@@ -26,11 +26,7 @@ public class ProyectoController {
         return proyectoRepository.findAll();
     }
 
-    // 2. Crear un nuevo proyecto
-    @PostMapping
-    public Proyecto crear(@RequestBody Proyecto proyecto) {
-        return proyectoRepository.save(proyecto);
-    }
+
 
     // 3. Obtener un proyecto por ID
     @GetMapping("/{id}")
@@ -38,6 +34,13 @@ public class ProyectoController {
         return proyectoRepository.findById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    // 2. Crear un nuevo proyecto
+    @PostMapping
+    public Proyecto crear(@RequestBody Proyecto proyecto) {
+        // CAMBIO: Usar el service en lugar del repository
+        return proyectoService.guardarProyecto(proyecto);
     }
 
     // 4. Actualizar un proyecto existente
@@ -50,8 +53,10 @@ public class ProyectoController {
                     proyecto.setFechaInicio(detalles.getFechaInicio());
                     proyecto.setPrioridad(detalles.getPrioridad());
                     proyecto.setProgresoPorcentaje(detalles.getProgresoPorcentaje());
-                    Proyecto actualizado = proyectoRepository.save(proyecto);
-                    return ResponseEntity.ok(actualizado);
+
+                    // CAMBIO: Aquí también deberías usar el service si quieres que
+                    // Analytics se entere de las actualizaciones.
+                    return ResponseEntity.ok(proyectoService.guardarProyecto(proyecto));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
