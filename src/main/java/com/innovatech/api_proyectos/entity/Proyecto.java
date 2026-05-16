@@ -1,6 +1,7 @@
 package com.innovatech.api_proyectos.entity;
 
 import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonProperty; // 👈 ¡ASEGÚRATE DE AÑADIR ESTE IMPORT!
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDate;
@@ -33,21 +34,24 @@ public class Proyecto {
 
     // Relación con el microservicio de Usuarios
     @Column(name = "usuario_id")
-    private Long usuarioId; // Solo guardamos el ID
+    private Long usuarioId; // Ya es un Long de objeto, esto está excelente.
 
-    @Transient // transient indica que se calcula acá y no en la base de datos
+    // 🛡️ SOLUCIÓN AL ERROR 500: Le decimos a Jackson que este campo es SOLO LECTURA.
+    // Así ignorará el campo "estadoCalculado" cuando React lo envíe en el POST/PUT.
+    @Transient
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public String getEstadoCalculado() {
-        if (progresoPorcentaje != null && progresoPorcentaje >= 100) { // esto indica que el proyecto está terminado
+        if (progresoPorcentaje != null && progresoPorcentaje >= 100) {
             return "COMPLETADO";
         }
 
-        LocalDate hoy = LocalDate.now(); // esto inicializa la fecha de hoy para caluclar los atrasos
+        LocalDate hoy = LocalDate.now();
 
-        if (fechaEntrega != null && hoy.isAfter(fechaEntrega)) { // si el dia de hoy es mayor a la entrega está atrasado
+        if (fechaEntrega != null && hoy.isAfter(fechaEntrega)) {
             return "ATRASADO";
         }
 
-        if (fechaEntrega != null && hoy.plusDays(7).isAfter(fechaEntrega)) { // esto es para alertar de que queda una semana
+        if (fechaEntrega != null && hoy.plusDays(7).isAfter(fechaEntrega)) {
             return "CRÍTICO (Próximo a vencer)";
         }
 

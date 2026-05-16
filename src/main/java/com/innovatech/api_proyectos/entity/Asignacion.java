@@ -1,14 +1,13 @@
 package com.innovatech.api_proyectos.entity;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.*; // 👈 Asegura que la importación de Lombok esté presente
 
 @Entity
-@Getter @Setter
-@NoArgsConstructor
-@AllArgsConstructor
+@Getter @Setter              // 👈 ¡FALTABA ESTO! Genera los getters y setters (setRolId, setUsuarioId, etc.)
+@NoArgsConstructor           // 👈 ¡FALTABA ESTO! Necesario para que JPA pueda instanciar la entidad
+@AllArgsConstructor          // 👈 ¡FALTABA ESTO! Genera el constructor con todos los campos
 @Table(name = "asignaciones")
 public class Asignacion {
 
@@ -16,8 +15,9 @@ public class Asignacion {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private Long usuarioId; // Referencia al ID en api-usuarios
-    private String rol;     // "ADMIN", "DEVELOPER", "TESTER"
+    private Long usuarioId; // ID en api-usuarios
+
+    private Long rolId;     // ID del rol (1 = ADMIN, 2 = DEVELOPER)
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "proyecto_id")

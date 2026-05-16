@@ -26,8 +26,11 @@ public class ProyectoService {
     }
 
     public UsuarioDTO fallbackGetUsuario(Long usuarioId, Throwable t) {
-        // Loggear el error es fundamental para monitoreo
-        return new UsuarioDTO(usuarioId, "Servicio temporalmente no disponible", "N/A");
+        // Imprimir el error real en los logs de Docker ayudará a saber por qué saltó el Circuit Breaker
+        System.err.println("🚨 Circuit Breaker activado para usuario ID " + usuarioId + ". Causa: " + t.getMessage());
+
+        // Le agregamos el cuarto parámetro exigido por el nuevo constructor de Lombok ("N/A" para el rol)
+        return new UsuarioDTO(usuarioId, "Servicio temporalmente no disponible", "N/A", "N/A");
     }
 
     @Transactional
