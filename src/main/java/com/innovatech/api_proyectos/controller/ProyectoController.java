@@ -174,4 +174,29 @@ public class ProyectoController {
 
         }).orElse(ResponseEntity.notFound().build());
     }
+    //8 endpoint de eliminar asignacion
+    @DeleteMapping("/{proyectoId}/asignaciones/{asignacionId}")
+    @org.springframework.transaction.annotation.Transactional
+    public ResponseEntity<?> desasignarUsuario(
+            @PathVariable Long proyectoId,
+            @PathVariable Long asignacionId) {
+
+        return asignacionRepository.findById(asignacionId).map(asignacion -> {
+
+            // Verificamos de forma segura que la asignación corresponda al proyecto enviado por URL
+            if (!asignacion.getProyecto().getId().equals(proyectoId)) {
+                return ResponseEntity.badRequest()
+                        .body("Error de consistencia: La asignación no pertenece al proyecto especificado.");
+            }
+
+            // Removemos de la colección del proyecto para que Hibernate mantenga sincronizada la relación bidireccional
+            Proyecto proyecto = asignacion.getProyecto();
+            proyecto.getAsignaciones().remove(asignacion);
+
+            // Eliminamos físicamente el registro de la tabla de asignaciones
+            asignacionRepository.delete(asignacion);
+
+            return ResponseEntity.ok().body("Usuario desasignado correctamente del proyecto.");
+        }).orElse(ResponseEntity.notFound().build());
+    }
 }
