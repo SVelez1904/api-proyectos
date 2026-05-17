@@ -14,7 +14,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/proyectos")
-@CrossOrigin(origins = "http://localhost:5173", allowedHeaders = "*", methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE}) // 👈 ¡AÑADE ESTO!
+@CrossOrigin(origins = "http://localhost:5173", allowedHeaders = "*", methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE})
 public class ProyectoController {
 
     @Autowired
@@ -44,7 +44,6 @@ public class ProyectoController {
     @PostMapping
     public ResponseEntity<?> crear(@RequestBody Proyecto proyecto) {
         try {
-            // Si el usuarioId viene vacío, aseguramos que viaje como null nativo en Hibernate
             if (proyecto.getUsuarioId() != null && proyecto.getUsuarioId() == 0) {
                 proyecto.setUsuarioId(null);
             }
@@ -55,12 +54,11 @@ public class ProyectoController {
         }
     }
 
-    // 4. Actualizar un proyecto existente (Sincronizado completamente con tu JSON de React)
+    // 4. Actualizar un proyecto existente
     @PutMapping("/{id}")
     public ResponseEntity<?> actualizar(@PathVariable Long id, @RequestBody Proyecto detalles) {
         return proyectoRepository.findById(id)
                 .map(proyectoExistente -> {
-                    // 1. Actualizamos los datos propios del proyecto
                     proyectoExistente.setNombre(detalles.getNombre());
                     proyectoExistente.setDescripcion(detalles.getDescripcion());
                     proyectoExistente.setFechaInicio(detalles.getFechaInicio());
@@ -68,16 +66,13 @@ public class ProyectoController {
                     proyectoExistente.setPrioridad(detalles.getPrioridad());
                     proyectoExistente.setProgresoPorcentaje(detalles.getProgresoPorcentaje());
 
-                    // 🔥 CRÍTICO: Sincronizamos el usuarioId raíz modificado en el modal de React
                     if (detalles.getUsuarioId() != null && detalles.getUsuarioId() != 0) {
                         proyectoExistente.setUsuarioId(detalles.getUsuarioId());
                     } else {
-                        proyectoExistente.setUsuarioId(null); // Si se desasignó el responsable principal
+                        proyectoExistente.setUsuarioId(null);
                     }
 
-                    // 2. EVITAMOS SOBREESCRIBIR LAS ASIGNACIONES CON NULL
                     Proyecto proyectoActualizado = proyectoService.guardarProyecto(proyectoExistente);
-
                     return ResponseEntity.ok(proyectoActualizado);
                 })
                 .orElse(ResponseEntity.notFound().build());
@@ -87,13 +82,17 @@ public class ProyectoController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> eliminar(@PathVariable Long id) {
         if (proyectoRepository.existsById(id)) {
+            // 🔥 Primero notificamos a Kafka antes de destruir el registro para tener el ID de referencia limpio
+            proyectoService.notificarEliminacionKafka(id);
+
+            // Ahora sí lo borramos de la BD local
             proyectoRepository.deleteById(id);
             return ResponseEntity.noContent().build();
         }
         return ResponseEntity.notFound().build();
     }
 
-    // 6. Asignar un usuario traduciendo su rol (String) del microservicio a un ID numérico
+    // 6. 🔥 ENDPOINT ADAPTADO: Asignar un usuario notificando correctamente a Kafka
     @PostMapping("/{proyectoId}/usuarios/{usuarioId}")
     public ResponseEntity<?> asignarUsuario(
             @PathVariable Long proyectoId,
@@ -106,38 +105,38 @@ public class ProyectoController {
                 return ResponseEntity.status(503).body("No se pudo validar el usuario. API Usuarios caída.");
             }
 
-            // Solución ultra-segura: Leemos el campo directamente o usamos un fallback directo
             Long rolIdCalculado = 2L;
-
             try {
-                // Esto evita problemas si Lombok se marea con los getters en el entorno de Docker
                 if (usuario.getRole() != null && usuario.getRole().toUpperCase().contains("ADMIN")) {
                     rolIdCalculado = 1L;
                 }
             } catch (Exception e) {
-                // Si por alguna razón falla el mapeo, se queda con el rol de Developer (2L) de forma segura
                 rolIdCalculado = 2L;
             }
 
+            // Instanciamos el registro relacional
             Asignacion nuevaAsignacion = new Asignacion();
             nuevaAsignacion.setUsuarioId(usuarioId);
             nuevaAsignacion.setRolId(rolIdCalculado);
             nuevaAsignacion.setProyecto(proyecto);
 
+            // Lo vinculamos a la lista del objeto persistente
             proyecto.getAsignaciones().add(nuevaAsignacion);
-            proyectoRepository.save(proyecto);
 
-            return ResponseEntity.ok("Usuario " + usuario.getUsername() + " asignado con Rol ID: " + rolIdCalculado);
+            // 🔥 DELEGAMOS AL SERVICIO: El método se encarga de persistir con Flush y despachar a Kafka de forma segura
+            proyectoService.asignarUsuarioYNotificarKafka(proyecto);
+
+            return ResponseEntity.ok("Usuario " + usuario.getUsername() + " asignado con Rol ID: " + rolIdCalculado + " y notificado a Kafka.");
         }).orElse(ResponseEntity.notFound().build());
     }
 
-    // 7. Cambiar el rol usando directamente el "rolId" que tú envíes en el JSON
+    // 7. Cambiar el rol e informar la actualización de métricas
     @PutMapping("/{proyectoId}/asignaciones/{asignacionId}")
     @org.springframework.transaction.annotation.Transactional
     public ResponseEntity<?> actualizarAsignacion(
             @PathVariable Long proyectoId,
             @PathVariable Long asignacionId,
-            @RequestBody Map<String, Object> body) { // 👈 Cambiado a <String, Object> para soportar números y cadenas
+            @RequestBody Map<String, Object> body) {
 
         return asignacionRepository.findById(asignacionId).map(asignacionExistente -> {
 
@@ -146,25 +145,22 @@ public class ProyectoController {
                         .body("Error: La asignación ID " + asignacionId + " no pertenece al proyecto " + proyectoId);
             }
 
-            // Extraemos el "rolId" de forma segura del JSON de Postman/React
             if (!body.containsKey("rolId") || body.get("rolId") == null) {
                 return ResponseEntity.badRequest().body("Error: El campo 'rolId' es obligatorio en el JSON.");
             }
 
             try {
-                // Parseo genérico por si Jackson lo interpreta como Integer o String
                 Long nuevoRolId = Long.parseLong(body.get("rolId").toString());
-
-                // Aplicamos el cambio numérico directo sobre la entidad
                 asignacionExistente.setRolId(nuevoRolId);
 
-                // Opcional: Permitir también reasignar el id de usuario en la misma petición
                 if (body.containsKey("usuarioId") && body.get("usuarioId") != null) {
                     asignacionExistente.setUsuarioId(Long.parseLong(body.get("usuarioId").toString()));
                 }
 
-                // Persistencia inmediata y limpieza forzada de la caché de Hibernate
                 asignacionRepository.saveAndFlush(asignacionExistente);
+
+                // 🔥 ALERTAMOS A KAFKA: Al modificarse un rol/usuario interno de la asignación, forzamos la actualización en analíticas
+                proyectoService.asignarUsuarioYNotificarKafka(asignacionExistente.getProyecto());
 
                 return ResponseEntity.ok("Sincronizado con éxito. La asignación " + asignacionId + " ahora tiene asignado el Rol ID: " + asignacionExistente.getRolId());
 
@@ -174,7 +170,8 @@ public class ProyectoController {
 
         }).orElse(ResponseEntity.notFound().build());
     }
-    //8 endpoint de eliminar asignacion
+
+    // 8. Endpoint de eliminar asignación sincronizado con Analytics
     @DeleteMapping("/{proyectoId}/asignaciones/{asignacionId}")
     @org.springframework.transaction.annotation.Transactional
     public ResponseEntity<?> desasignarUsuario(
@@ -183,18 +180,26 @@ public class ProyectoController {
 
         return asignacionRepository.findById(asignacionId).map(asignacion -> {
 
-            // Verificamos de forma segura que la asignación corresponda al proyecto enviado por URL
             if (!asignacion.getProyecto().getId().equals(proyectoId)) {
                 return ResponseEntity.badRequest()
-                        .body("Error de consistencia: La asignación no pertenece al proyecto especificado.");
+                        .body("Error de consistency: La asignación no pertenece al proyecto especificado.");
             }
 
-            // Removemos de la colección del proyecto para que Hibernate mantenga sincronizada la relación bidireccional
             Proyecto proyecto = asignacion.getProyecto();
-            proyecto.getAsignaciones().remove(asignacion);
 
-            // Eliminamos físicamente el registro de la tabla de asignaciones
+            // Removemos de la colección bidireccional
+            proyecto.getAsignaciones().remove(asignacion);
             asignacionRepository.delete(asignacion);
+            asignacionRepository.flush();
+
+            // 🔥 Si tras borrar esta asignación el proyecto se quedó sin NINGÚN usuario,
+            // mandamos un "DELETE" a Analytics para que limpie la tabla intermedia de inmediato.
+            if (proyecto.getAsignaciones().isEmpty()) {
+                proyectoService.notificarEliminacionKafka(proyectoId);
+            } else {
+                // Si aún quedan otros usuarios trabajando en el proyecto, mandamos un update normal con los que quedan
+                proyectoService.asignarUsuarioYNotificarKafka(proyecto);
+            }
 
             return ResponseEntity.ok().body("Usuario desasignado correctamente del proyecto.");
         }).orElse(ResponseEntity.notFound().build());

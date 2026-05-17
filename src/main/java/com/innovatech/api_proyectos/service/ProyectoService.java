@@ -8,9 +8,12 @@ import com.innovatech.api_proyectos.repository.ProyectoRepository;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -18,7 +21,7 @@ public class ProyectoService {
 
     private final UsuarioFeignClient usuarioFeignClient;
     private final KafkaTemplate<String, ProyectoEvent> kafkaTemplate;
-    private final ProyectoRepository proyectoRepository; // Inyectado vía constructor
+    private final ProyectoRepository proyectoRepository;
 
     @CircuitBreaker(name = "usuariosCB", fallbackMethod = "fallbackGetUsuario")
     public UsuarioDTO obtenerDetallesUsuario(Long usuarioId) {
@@ -26,29 +29,55 @@ public class ProyectoService {
     }
 
     public UsuarioDTO fallbackGetUsuario(Long usuarioId, Throwable t) {
-        // Imprimir el error real en los logs de Docker ayudará a saber por qué saltó el Circuit Breaker
         System.err.println("🚨 Circuit Breaker activado para usuario ID " + usuarioId + ". Causa: " + t.getMessage());
-
-        // Le agregamos el cuarto parámetro exigido por el nuevo constructor de Lombok ("N/A" para el rol)
         return new UsuarioDTO(usuarioId, "Servicio temporalmente no disponible", "N/A", "N/A");
     }
 
+    /**
+     * 1. GUARDAR PROYECTO BASE (Limpio de Kafka para evitar adelantos de eventos vacíos)
+     */
     @Transactional
     public Proyecto guardarProyecto(Proyecto p) {
-        // 1. Guardar en la base de datos local
-        Proyecto proyectoGuardado = proyectoRepository.save(p);
-        System.out.println("Proyecto guardado en DB, intentando enviar a Kafka...");
+        return proyectoRepository.saveAndFlush(p);
+    }
 
-        // 2. Preparar el evento para Analytics
+    /**
+     * 2. 🔥 PROCESAR ASIGNACIONES/MUTACIONES Y ENVIAR AL TÓPICO
+     * Consolida de forma síncrona el estado del objeto mutado en el Controller
+     * y despacha el listado real de IDs a Kafka.
+     */
+    @Transactional
+    public Proyecto asignarUsuarioYNotificarKafka(Proyecto proyectoModificado) {
+        // 1. Forzamos el guardado y confirmamos los cambios físicos en PostgreSQL de inmediato
+        Proyecto proyectoActualizado = proyectoRepository.saveAndFlush(proyectoModificado);
+        System.out.println("Asignación e hijo consolidados en DB (Flush). Preparando despacho a Kafka...");
+
+        // 2. 🔥 CORRECCIÓN CLAVE: Mapeamos usando Collectors.toCollection(ArrayList::new)
+        // Esto garantiza que la lista sea mutable y Jackson (Kafka) la serialice sin romper por restricciones de inmutabilidad
+        List<Long> idsAsignados = (proyectoActualizado.getAsignaciones() != null)
+                ? proyectoActualizado.getAsignaciones().stream()
+                .map(asignacion -> asignacion.getUsuarioId())
+                .collect(Collectors.toCollection(ArrayList::new))
+                : new ArrayList<>();
+
+        // Fallback seguro si usas la columna usuario_id directa en la raíz del proyecto
+        if (idsAsignados.isEmpty() && proyectoActualizado.getUsuarioId() != null) {
+            idsAsignados.add(proyectoActualizado.getUsuarioId());
+        }
+
+        System.out.println("📦 IDs de usuarios reales recolectados para Kafka: " + idsAsignados);
+
+        // 3. Preparamos el evento DTO con los 6 parámetros requeridos por tu constructor
         ProyectoEvent evento = new ProyectoEvent(
-                proyectoGuardado.getId(),
-                proyectoGuardado.getNombre(),
-                proyectoGuardado.getProgresoPorcentaje(),
-                proyectoGuardado.getEstadoCalculado(),
-                "UPDATE"
+                proyectoActualizado.getId(),
+                proyectoActualizado.getNombre(),
+                proyectoActualizado.getProgresoPorcentaje(),
+                proyectoActualizado.getEstadoCalculado(),
+                "UPDATE",
+                idsAsignados
         );
 
-        // 3. Enviar a Kafka de forma asíncrona
+        // 4. Enviar al tópico de Kafka de manera asíncrona
         kafkaTemplate.send("proyectos-topic", evento).whenComplete((result, ex) -> {
             if (ex != null) {
                 System.err.println("FATAL: No se pudo enviar a Kafka: " + ex.getMessage());
@@ -57,7 +86,32 @@ public class ProyectoService {
             }
         });
 
-        // 4. ¡IMPORTANTE! Retornar el objeto guardado
-        return proyectoGuardado;
+        return proyectoActualizado;
+    }
+
+    /**
+     * 3. NOTIFICAR ELIMINACIÓN TOTAL O PARCIAL A KAFKA (DELETE)
+     */
+    @Transactional
+    public void notificarEliminacionKafka(Long proyectoId) {
+        System.out.println("Alerta de eliminación detectada para proyecto ID: " + proyectoId + ". Notificando a Kafka...");
+
+        // Enviamos una lista mutable vacía (ArrayList) para máxima compatibilidad con Jackson
+        ProyectoEvent evento = new ProyectoEvent(
+                proyectoId,
+                "Proyecto Eliminado",
+                0,
+                "ELIMINADO",
+                "DELETE",
+                new ArrayList<>()
+        );
+
+        kafkaTemplate.send("proyectos-topic", evento).whenComplete((result, ex) -> {
+            if (ex != null) {
+                System.err.println("FATAL: No se pudo enviar el DELETE a Kafka: " + ex.getMessage());
+            } else {
+                System.out.println("EXITO: Evento DELETE enviado a proyectos-topic");
+            }
+        });
     }
 }
