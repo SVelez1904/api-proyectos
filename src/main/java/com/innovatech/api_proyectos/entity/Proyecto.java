@@ -1,7 +1,7 @@
 package com.innovatech.api_proyectos.entity;
 
 import com.fasterxml.jackson.annotation.JsonManagedReference;
-import com.fasterxml.jackson.annotation.JsonProperty; // 👈 ¡ASEGÚRATE DE AÑADIR ESTE IMPORT!
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDate;

@@ -7,5 +7,4 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface AsignacionRepository extends JpaRepository<Asignacion, Long> {
-    // Spring Data JPA generará automáticamente toda la implementación de base aquí (findById, save, delete, etc.)
 }

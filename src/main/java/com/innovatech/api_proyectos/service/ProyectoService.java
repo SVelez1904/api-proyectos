@@ -33,41 +33,32 @@ public class ProyectoService {
         return new UsuarioDTO(usuarioId, "Servicio temporalmente no disponible", "N/A", "N/A");
     }
 
-    /**
-     * 1. GUARDAR PROYECTO BASE (Limpio de Kafka para evitar adelantos de eventos vacíos)
-     */
+
+     // 1. GUARDAR PROYECTO BASE
     @Transactional
     public Proyecto guardarProyecto(Proyecto p) {
         return proyectoRepository.saveAndFlush(p);
     }
 
-    /**
-     * 2. 🔥 PROCESAR ASIGNACIONES/MUTACIONES Y ENVIAR AL TÓPICO
-     * Consolida de forma síncrona el estado del objeto mutado en el Controller
-     * y despacha el listado real de IDs a Kafka.
-     */
+
     @Transactional
     public Proyecto asignarUsuarioYNotificarKafka(Proyecto proyectoModificado) {
         // 1. Forzamos el guardado y confirmamos los cambios físicos en PostgreSQL de inmediato
         Proyecto proyectoActualizado = proyectoRepository.saveAndFlush(proyectoModificado);
         System.out.println("Asignación e hijo consolidados en DB (Flush). Preparando despacho a Kafka...");
-
-        // 2. 🔥 CORRECCIÓN CLAVE: Mapeamos usando Collectors.toCollection(ArrayList::new)
-        // Esto garantiza que la lista sea mutable y Jackson (Kafka) la serialice sin romper por restricciones de inmutabilidad
         List<Long> idsAsignados = (proyectoActualizado.getAsignaciones() != null)
                 ? proyectoActualizado.getAsignaciones().stream()
                 .map(asignacion -> asignacion.getUsuarioId())
                 .collect(Collectors.toCollection(ArrayList::new))
                 : new ArrayList<>();
 
-        // Fallback seguro si usas la columna usuario_id directa en la raíz del proyecto
         if (idsAsignados.isEmpty() && proyectoActualizado.getUsuarioId() != null) {
             idsAsignados.add(proyectoActualizado.getUsuarioId());
         }
 
         System.out.println("📦 IDs de usuarios reales recolectados para Kafka: " + idsAsignados);
 
-        // 3. Preparamos el evento DTO con los 6 parámetros requeridos por tu constructor
+        // 3. Preparamos el evento DTO con los 6 parámetros requeridos
         ProyectoEvent evento = new ProyectoEvent(
                 proyectoActualizado.getId(),
                 proyectoActualizado.getNombre(),
@@ -89,9 +80,7 @@ public class ProyectoService {
         return proyectoActualizado;
     }
 
-    /**
-     * 3. NOTIFICAR ELIMINACIÓN TOTAL O PARCIAL A KAFKA (DELETE)
-     */
+    //3. NOTIFICAR ELIMINACIÓN TOTAL O PARCIAL A KAFKA (DELETE)
     @Transactional
     public void notificarEliminacionKafka(Long proyectoId) {
         System.out.println("Alerta de eliminación detectada para proyecto ID: " + proyectoId + ". Notificando a Kafka...");

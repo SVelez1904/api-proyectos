@@ -9,8 +9,8 @@ import lombok.NoArgsConstructor;
 import java.util.List;
 
 @Data
-@AllArgsConstructor // <--- ESTA ES LA CLAVE: Genera el constructor para los 5 parámetros
-@NoArgsConstructor  // <--- NECESARIA: Para que Kafka pueda deserializar el objeto
+@AllArgsConstructor
+@NoArgsConstructor
 public class ProyectoEvent {
     private Long id;
     private String nombre;

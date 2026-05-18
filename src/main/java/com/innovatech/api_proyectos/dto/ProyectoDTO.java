@@ -17,13 +17,7 @@ public class ProyectoDTO {
     private LocalDate fechaEntrega;
     private String prioridad;
     private Integer progresoPorcentaje;
-
-    // Aquí puedes incluir el estado calculado para que el Frontend lo muestre
     private String estado;
-
-    // El ID del usuario responsable
     private Long usuarioId;
-
-    // Opcional: Si quieres enviar los datos del usuario ya completos en la misma respuesta
     private UsuarioDTO usuarioDetalles;
 }
