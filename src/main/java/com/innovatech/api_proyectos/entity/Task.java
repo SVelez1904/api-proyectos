@@ -3,6 +3,7 @@ package com.innovatech.api_proyectos.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDate;
+import com.fasterxml.jackson.annotation.JsonBackReference;
 
 @Entity
 @Getter @Setter
@@ -25,5 +26,6 @@ public class Task {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "proyecto_id")
+    @JsonBackReference
     private Proyecto proyecto;
 }

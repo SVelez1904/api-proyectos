@@ -34,7 +34,7 @@ public class ProyectoService {
     }
 
 
-     // 1. GUARDAR PROYECTO BASE
+    // 1. GUARDAR PROYECTO BASE
     @Transactional
     public Proyecto guardarProyecto(Proyecto p) {
         return proyectoRepository.saveAndFlush(p);

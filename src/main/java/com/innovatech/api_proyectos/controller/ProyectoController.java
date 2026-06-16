@@ -204,4 +204,61 @@ public class ProyectoController {
             return ResponseEntity.ok().body("Usuario desasignado correctamente del proyecto.");
         }).orElse(ResponseEntity.notFound().build());
     }
+    // ==========================================
+    //          CRUD DE TAREAS (TASKS)
+    // ==========================================
+
+    // 1. Crear una tarea dentro de un proyecto
+    @PostMapping("/{proyectoId}/tasks")
+    public ResponseEntity<?> crearTarea(@PathVariable Long proyectoId, @RequestBody com.innovatech.api_proyectos.entity.Task nuevaTarea) {
+        return proyectoRepository.findById(proyectoId).map(proyecto -> {
+            nuevaTarea.setProyecto(proyecto);
+            if (nuevaTarea.getEstado() == null) {
+                nuevaTarea.setEstado("Pendiente");
+            }
+            proyecto.getTasks().add(nuevaTarea);
+            proyectoRepository.save(proyecto); // CascadeType.ALL guarda la tarea automáticamente
+            return ResponseEntity.status(201).body(nuevaTarea);
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    // 2. Actualizar una tarea existente
+    @PutMapping("/{proyectoId}/tasks/{taskId}")
+    public ResponseEntity<?> actualizarTarea(
+            @PathVariable Long proyectoId,
+            @PathVariable Long taskId,
+            @RequestBody com.innovatech.api_proyectos.entity.Task detallesTarea) {
+
+        return proyectoRepository.findById(proyectoId).map(proyecto -> {
+            com.innovatech.api_proyectos.entity.Task tareaExistente = proyecto.getTasks().stream()
+                    .filter(t -> t.getId().equals(taskId))
+                    .findFirst()
+                    .orElse(null);
+
+            if (tareaExistente == null) {
+                return ResponseEntity.status(404).body("Tarea no encontrada en este proyecto");
+            }
+
+            tareaExistente.setTitulo(detallesTarea.getTitulo());
+            tareaExistente.setDescripcion(detallesTarea.getDescripcion());
+            tareaExistente.setEstado(detallesTarea.getEstado());
+            tareaExistente.setFechaVencimiento(detallesTarea.getFechaVencimiento());
+
+            proyectoRepository.save(proyecto);
+            return ResponseEntity.ok(tareaExistente);
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    // 3. Eliminar una tarea
+    @DeleteMapping("/{proyectoId}/tasks/{taskId}")
+    public ResponseEntity<?> eliminarTarea(@PathVariable Long proyectoId, @PathVariable Long taskId) {
+        return proyectoRepository.findById(proyectoId).map(proyecto -> {
+            boolean removido = proyecto.getTasks().removeIf(t -> t.getId().equals(taskId));
+            if (!removido) {
+                return ResponseEntity.status(404).body("Tarea no encontrada");
+            }
+            proyectoRepository.save(proyecto);
+            return ResponseEntity.ok().body("Tarea eliminada correctamente");
+        }).orElse(ResponseEntity.notFound().build());
+    }
 }
