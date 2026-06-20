@@ -40,12 +40,32 @@ public class ProyectoService {
         return proyectoRepository.saveAndFlush(p);
     }
 
+    // 🔥 2. NUEVO MÉTODO: RECALCULAR PROGRESO DESDE EL SERVICIO Y COHESIONAR CON KAFKA
+    @Transactional
+    public Proyecto actualizarProgresoYNotificarKafka(Long proyectoId) {
+        // Buscamos el proyecto con sus tareas cargadas
+        Proyecto proyecto = proyectoRepository.findById(proyectoId)
+                .orElseThrow(() -> new RuntimeException("Proyecto no encontrado con ID: " + proyectoId));
+
+        // Ejecutamos la lógica que calcula el progreso en base a sus sub-tareas
+        proyecto.actualizarProgresoSegunTareas();
+
+        // Reutilizamos el despacho a Kafka delegando al método que ya procesa el envío de updates
+        return despacharUpdateKafka(proyecto);
+    }
+
 
     @Transactional
     public Proyecto asignarUsuarioYNotificarKafka(Proyecto proyectoModificado) {
-        // 1. Forzamos el guardado y confirmamos los cambios físicos en PostgreSQL de inmediato
-        Proyecto proyectoActualizado = proyectoRepository.saveAndFlush(proyectoModificado);
-        System.out.println("Asignación e hijo consolidados en DB (Flush). Preparando despacho a Kafka...");
+        // Forzamos el guardado y confirmamos los cambios físicos en PostgreSQL de inmediato
+        return despacharUpdateKafka(proyectoModificado);
+    }
+
+    // 💡 EXTRA: Helper interno privado para evitar duplicar la lógica de envío de Kafka (UPDATE)
+    private Proyecto despacharUpdateKafka(Proyecto proyectoAEnviar) {
+        Proyecto proyectoActualizado = proyectoRepository.saveAndFlush(proyectoAEnviar);
+        System.out.println("🔄 Consolidando estado del proyecto en DB (Flush) para Kafka. Progreso: " + proyectoActualizado.getProgresoPorcentaje() + "%");
+
         List<Long> idsAsignados = (proyectoActualizado.getAsignaciones() != null)
                 ? proyectoActualizado.getAsignaciones().stream()
                 .map(asignacion -> asignacion.getUsuarioId())
@@ -58,7 +78,7 @@ public class ProyectoService {
 
         System.out.println("📦 IDs de usuarios reales recolectados para Kafka: " + idsAsignados);
 
-        // 3. Preparamos el evento DTO con los 6 parámetros requeridos
+        // Preparamos el evento DTO con el progreso e ID actualizados
         ProyectoEvent evento = new ProyectoEvent(
                 proyectoActualizado.getId(),
                 proyectoActualizado.getNombre(),
@@ -68,7 +88,7 @@ public class ProyectoService {
                 idsAsignados
         );
 
-        // 4. Enviar al tópico de Kafka de manera asíncrona
+        // Enviar al tópico de Kafka de manera asíncrona
         kafkaTemplate.send("proyectos-topic", evento).whenComplete((result, ex) -> {
             if (ex != null) {
                 System.err.println("FATAL: No se pudo enviar a Kafka: " + ex.getMessage());
@@ -85,7 +105,6 @@ public class ProyectoService {
     public void notificarEliminacionKafka(Long proyectoId) {
         System.out.println("Alerta de eliminación detectada para proyecto ID: " + proyectoId + ". Notificando a Kafka...");
 
-        // Enviamos una lista mutable vacía (ArrayList) para máxima compatibilidad con Jackson
         ProyectoEvent evento = new ProyectoEvent(
                 proyectoId,
                 "Proyecto Eliminado",
