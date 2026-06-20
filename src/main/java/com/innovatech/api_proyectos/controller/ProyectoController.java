@@ -5,6 +5,7 @@ import com.innovatech.api_proyectos.entity.Proyecto;
 import com.innovatech.api_proyectos.repository.ProyectoRepository;
 import com.innovatech.api_proyectos.repository.AsignacionRepository;
 import com.innovatech.api_proyectos.service.ProyectoService;
+import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -209,20 +210,40 @@ public class ProyectoController {
     // ==========================================
 
     // 1. Crear una tarea dentro de un proyecto
+    @org.springframework.transaction.annotation.Transactional
     @PostMapping("/{proyectoId}/tasks")
-    public ResponseEntity<?> crearTarea(@PathVariable Long proyectoId, @RequestBody com.innovatech.api_proyectos.entity.Task nuevaTarea) {
+    public ResponseEntity<?> crearTarea(
+            @PathVariable Long proyectoId,
+            @RequestBody com.innovatech.api_proyectos.entity.Task nuevaTarea) {
+
         return proyectoRepository.findById(proyectoId).map(proyecto -> {
+            // 1. Establecemos la relación bidireccional en memoria
             nuevaTarea.setProyecto(proyecto);
             if (nuevaTarea.getEstado() == null) {
                 nuevaTarea.setEstado("Pendiente");
             }
             proyecto.getTasks().add(nuevaTarea);
-            proyectoRepository.save(proyecto); // CascadeType.ALL guarda la tarea automáticamente
-            return ResponseEntity.status(201).body(nuevaTarea);
+
+            // 2. Guardamos el PROYECTO completo y forzamos el Flush para que impacte en la BD
+            Proyecto proyectoGuardado = proyectoRepository.saveAndFlush(proyecto);
+
+            // 3. 🔥 Buscamos la tarea recién guardada dentro del proyecto persistido
+            // para obtener el objeto que ya tiene el ID asignado por PostgreSQL
+            com.innovatech.api_proyectos.entity.Task tareaConId = proyectoGuardado.getTasks().stream()
+                    .filter(t -> t.getTitulo().equals(nuevaTarea.getTitulo()) && t.getId() != null)
+                    .findFirst()
+                    .orElse(nuevaTarea); // Fallback por seguridad
+
+            // 4. 🔥 Recalcula el progreso general y alerta a Kafka
+            proyectoService.actualizarProgresoYNotificarKafka(proyectoId);
+
+            // 5. Retornamos la tarea con su ID real de la base de datos
+            return ResponseEntity.status(201).body(tareaConId);
         }).orElse(ResponseEntity.notFound().build());
     }
 
     // 2. Actualizar una tarea existente
+    @org.springframework.transaction.annotation.Transactional
     @PutMapping("/{proyectoId}/tasks/{taskId}")
     public ResponseEntity<?> actualizarTarea(
             @PathVariable Long proyectoId,
@@ -244,12 +265,17 @@ public class ProyectoController {
             tareaExistente.setEstado(detallesTarea.getEstado());
             tareaExistente.setFechaVencimiento(detallesTarea.getFechaVencimiento());
 
-            proyectoRepository.save(proyecto);
+            proyectoRepository.saveAndFlush(proyecto); // Impacta el cambio de estado de la tarea en Postgres
+
+            // 🔥 Fuerza el recálculo matemático de la barra de progreso general y alerta a Kafka
+            proyectoService.actualizarProgresoYNotificarKafka(proyectoId);
+
             return ResponseEntity.ok(tareaExistente);
         }).orElse(ResponseEntity.notFound().build());
     }
 
     // 3. Eliminar una tarea
+    @org.springframework.transaction.annotation.Transactional
     @DeleteMapping("/{proyectoId}/tasks/{taskId}")
     public ResponseEntity<?> eliminarTarea(@PathVariable Long proyectoId, @PathVariable Long taskId) {
         return proyectoRepository.findById(proyectoId).map(proyecto -> {
@@ -257,7 +283,11 @@ public class ProyectoController {
             if (!removido) {
                 return ResponseEntity.status(404).body("Tarea no encontrada");
             }
-            proyectoRepository.save(proyecto);
+            proyectoRepository.saveAndFlush(proyecto); // Borra físicamente de la BD
+
+            // 🔥 Actualiza la barra del proyecto (Ej: si quedaba 1 completada de 2 totales y borras la pendiente, sube al 100%)
+            proyectoService.actualizarProgresoYNotificarKafka(proyectoId);
+
             return ResponseEntity.ok().body("Tarea eliminada correctamente");
         }).orElse(ResponseEntity.notFound().build());
     }

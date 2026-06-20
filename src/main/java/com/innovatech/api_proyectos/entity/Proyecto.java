@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDate;
+import java.util.ArrayList; // 🔥 IMPORTANTE: Agregar esta importación
 import java.util.List;
 
 @Entity
@@ -34,7 +35,7 @@ public class Proyecto {
 
     // Relación con el microservicio de Usuarios
     @Column(name = "usuario_id")
-    private Long usuarioId; // Ya es un Long de objeto, esto está excelente.
+    private Long usuarioId;
 
     // 🛡️ SOLUCIÓN AL ERROR 500: Le decimos a Jackson que este campo es SOLO LECTURA.
     // Así ignorará el campo "estadoCalculado" cuando React lo envíe en el POST/PUT.
@@ -60,9 +61,27 @@ public class Proyecto {
 
     // Relación One-to-Many con Tareas
     @OneToMany(mappedBy = "proyecto", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Task> tasks;
+    private List<Task> tasks = new ArrayList<>(); // 🔥 Inicializado para evitar NullPointerException
 
     @OneToMany(mappedBy = "proyecto", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference
-    private List<Asignacion> asignaciones;
+    private List<Asignacion> asignaciones = new ArrayList<>(); // 🔥 Inicializado para evitar NullPointerException
+
+    // 🔥 LOGICA AUTOMÁTICA PARA LA BARRA DE PROGRESO (KANBAN)
+    public void actualizarProgresoSegunTareas() {
+        if (this.tasks == null || this.tasks.isEmpty()) {
+            this.progresoPorcentaje = 0;
+            return;
+        }
+
+        long tareasCompletadas = this.tasks.stream()
+                .filter(t -> t.getEstado() != null && t.getEstado().equalsIgnoreCase("Completada"))
+                .count();
+
+        // Calculamos el porcentaje: (Completadas / Totales) * 100
+        double porcentaje = ((double) tareasCompletadas / this.tasks.size()) * 100;
+
+        // Redondeamos para evitar decimales extraños en el Integer de la base de datos
+        this.progresoPorcentaje = (int) Math.round(porcentaje);
+    }
 }
