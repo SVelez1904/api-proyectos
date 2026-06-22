@@ -7,11 +7,19 @@ spring:
 
   kafka:
     bootstrap-servers: kafka:29092
+    # Configuración del Productor (Se mantiene para tus updates de Analytics)
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       properties:
         spring.json.add.type.headers: true
+
+    # 🔥 NUEVO: Configuración del Consumidor para escuchar la limpieza de usuarios
+    consumer:
+      group-id: proyectos-cleanup-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
 
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://db-proyectos:5432/db_proyectos}
@@ -47,4 +55,3 @@ resilience4j:
         eventConsumerBufferSize: 10
         writableStackTraceEnabled: true
         shareSecurityContext: true
-

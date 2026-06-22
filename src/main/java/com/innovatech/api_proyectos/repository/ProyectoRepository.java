@@ -1,7 +1,9 @@
 package com.innovatech.api_proyectos.repository;
 
 import com.innovatech.api_proyectos.entity.Proyecto;
+import jakarta.transaction.Transactional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -18,4 +20,11 @@ public interface ProyectoRepository extends JpaRepository<Proyecto, Long> {
     // Listar proyectos que vencen en los próximos 7 días
     @Query("SELECT p FROM Proyecto p WHERE p.fechaEntrega BETWEEN CURRENT_DATE AND :proximaSemana")
     List<Proyecto> findPorVencer(@Param("proximaSemana") LocalDate proximaSemana);
+
+    // En ProyectoRepository
+    @Modifying
+    @Transactional
+    @Query("UPDATE Proyecto p SET p.usuarioId = null WHERE p.usuarioId = :usuarioId")
+    void desasignarUsuarioEliminado(@Param("usuarioId") Long usuarioId);
+
 }
