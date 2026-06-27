@@ -148,4 +148,99 @@ class ProyectoServiceTest {
                         "ELIMINADO".equals(evento.getEstado())
         ));
     }
+
+
+
+    @Test
+    @DisplayName("Debe actualizar el progreso basado en tareas y despachar el evento a Kafka exitosamente")
+    void actualizarProgresoYNotificarKafka_CaminoFeliz() {
+        // Arrange
+        Long proyectoId = 10L;
+        Proyecto proyectoMock = new Proyecto();
+        proyectoMock.setId(proyectoId);
+        proyectoMock.setNombre("GranuFactory E-commerce");
+        proyectoMock.setProgresoPorcentaje(0); // Inicia en cero
+        proyectoMock.setUsuarioId(1L);
+        proyectoMock.setTasks(new ArrayList<>()); // Lista vacía para que calcule
+
+        // Simulamos que findById lo encuentra y que saveAndFlush guarda el cambio
+        when(proyectoRepository.findById(proyectoId)).thenReturn(java.util.Optional.of(proyectoMock));
+        when(proyectoRepository.saveAndFlush(any(Proyecto.class))).thenReturn(proyectoMock);
+
+        CompletableFuture<SendResult<String, ProyectoEvent>> futureExitoso = CompletableFuture.completedFuture(mock(SendResult.class));
+        when(kafkaTemplate.send(eq("proyectos-topic"), any(ProyectoEvent.class))).thenReturn(futureExitoso);
+
+        // Act
+        Proyecto resultado = proyectoService.actualizarProgresoYNotificarKafka(proyectoId);
+
+        // Assert
+        assertNotNull(resultado);
+        verify(proyectoRepository, times(1)).findById(proyectoId);
+        verify(proyectoRepository, times(1)).saveAndFlush(any(Proyecto.class));
+        verify(kafkaTemplate, times(1)).send(eq("proyectos-topic"), any(ProyectoEvent.class));
+    }
+
+    @Test
+    @DisplayName("Debe lanzar RuntimeException si el proyecto no existe al intentar actualizar progreso")
+    void actualizarProgresoYNotificarKafka_ProyectoNoEncontrado() {
+        // Arrange
+        Long proyectoId = 999L;
+        when(proyectoRepository.findById(proyectoId)).thenReturn(java.util.Optional.empty());
+
+        // Act & Assert
+        RuntimeException excepcion = assertThrows(RuntimeException.class, () -> {
+            proyectoService.actualizarProgresoYNotificarKafka(proyectoId);
+        });
+
+        assertEquals("Proyecto no encontrado con ID: " + proyectoId, excepcion.getMessage());
+        verify(proyectoRepository, times(1)).findById(proyectoId);
+        verify(proyectoRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(kafkaTemplate);
+    }
+
+    @Test
+    @DisplayName("Debe cubrir la rama de error de la lambda en despacharUpdateKafka cuando falla el envío")
+    void despacharUpdateKafka_RamaErrorLambda() {
+        // Arrange
+        Proyecto proyectoModificado = new Proyecto();
+        proyectoModificado.setId(10L);
+        proyectoModificado.setUsuarioId(1L);
+
+        when(proyectoRepository.saveAndFlush(any(Proyecto.class))).thenReturn(proyectoModificado);
+
+        // Simulamos que el CompletableFuture falla de forma asíncrona
+        CompletableFuture<SendResult<String, ProyectoEvent>> futureFallido = new CompletableFuture<>();
+        futureFallido.completeExceptionally(new RuntimeException("Kafka Broker Down"));
+
+        when(kafkaTemplate.send(eq("proyectos-topic"), any(ProyectoEvent.class))).thenReturn(futureFallido);
+
+        // Act
+        // Ejecutamos a través de asignarUsuarioYNotificarKafka para disparar despacharUpdateKafka de forma indirecta
+        Proyecto resultado = proyectoService.asignarUsuarioYNotificarKafka(proyectoModificado);
+
+        // Assert
+        assertNotNull(resultado);
+        // La ejecución no se detiene porque el callback es asíncrono, pero se ejecuta el System.err.println interno
+        verify(kafkaTemplate, times(1)).send(eq("proyectos-topic"), any(ProyectoEvent.class));
+    }
+
+    @Test
+    @DisplayName("Debe cubrir la rama de error de la lambda en notificarEliminacionKafka cuando falla el envío")
+    void notificarEliminacionKafka_RamaErrorLambda() {
+        // Arrange
+        Long proyectoId = 25L;
+
+        // Simulamos que el CompletableFuture del DELETE falla de forma asíncrona
+        CompletableFuture<SendResult<String, ProyectoEvent>> futureFallido = new CompletableFuture<>();
+        futureFallido.completeExceptionally(new RuntimeException("Kafka Network Timeout"));
+
+        when(kafkaTemplate.send(eq("proyectos-topic"), any(ProyectoEvent.class))).thenReturn(futureFallido);
+
+        // Act
+        proyectoService.notificarEliminacionKafka(proyectoId);
+
+        // Assert
+        verify(kafkaTemplate, times(1)).send(eq("proyectos-topic"), any(ProyectoEvent.class));
+    }
+
 }
